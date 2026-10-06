@@ -1,0 +1,39 @@
+.dockerignore
+  s_ad1f413a202248::t_56cdc99589a24c 1-4
+.env.example
+  s_ad1f413a202248::t_6dd69da8471436 1-22
+.gitignore
+  s_ad1f413a202248::t_30dc936b3acb9e 1-4
+Dockerfile
+  s_ad1f413a202248::t_9bcef068e4b3e4 1-9
+README.md
+  s_ad1f413a202248::t_b0e885ec706e41 1-87
+dev/dev.js
+  s_ad1f413a202248::t_8ac3f9a7b9c027 1-16
+dev/mock-portkey.js
+  s_ad1f413a202248::t_8962e59f17b9f7 1-137
+package.json
+  s_ad1f413a202248::t_06858745a9d332 1-13
+public/index.html
+  s_ad1f413a202248::t_8c50163d537c80 1-901
+server.js
+  s_ad1f413a202248::t_b428d6aedd2d83 1-415
+test/app.test.js
+  s_ad1f413a202248::t_bd816f0fb7f650 1-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "4b54f1a54f8deaf4b19a630c72ba57253fba8555",
+  "prompts": {},
+  "sessions": {
+    "s_ad1f413a202248": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf01e9eb-fbb6-42b7-8f6e-91b5807a90cc",
+        "model": "unknown"
+      },
+      "human_author": "Rohit Agarwal <rohit@portkey.ai>"
+    }
+  }
+}
