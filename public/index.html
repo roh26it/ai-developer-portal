@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Developer Portal</title>
+
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/antd@5.21.6/dist/reset.css">
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/antd@5.21.6/dist/antd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ant-design/icons@5.5.1/dist/index.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/recharts@2.13.3/umd/Recharts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></script>
+<style>
+  body { margin:0; background:#FAFAFA; }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb { background:#D9D9D9; border-radius:4px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- No build step on purpose: edit this file and reload. All data comes from server.js /api routes. -->
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+const {
+  Alert, Avatar, Button, Card, Col, ConfigProvider, Dropdown, Empty, Flex, Form, Input, InputNumber,
+  Layout, Menu, Modal, Popconfirm, Progress, Radio, Result, Row, Segmented, Select, Skeleton, Space, Spin,
+  Table, Tag, Tooltip, Typography, App: AntApp, message, theme,
+} = antd;
+const { Text } = Typography;
+const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip: RTooltip, ResponsiveContainer, Legend } = Recharts;
+
+const DP = {
+  bg:'#FAFAFA', surface:'#FFFFFF', surfaceAlt:'#FAFAFA', headerBg:'#F5F5F5',
+  border:'#DEDEDE', borderInput:'#D9D9D9',
+  text:'#072535', textMuted:'#6A6A6A', textDim:'#9F9F9F',
+  primary:'#49004B', primaryBright:'#6D2170', primarySoft:'#F3E8F4',
+  gold:'#FFD828',
+  success:'#1E7C3B', successSoft:'#D8EFDA',
+  warning:'#AE5800', warningSoft:'#FFF2E0',
+  error:'#DB0000', errorSoft:'#FFEAEA',
+  info:'#0229B1', infoSoft:'#E6EAFB',
+  chartGreen:'#1E7C3B', chartBlue:'#0229B1', chartGrid:'#EDEDED',
+  fontSans:"'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif",
+  fontMono:"'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+};
+DP.font = DP.fontSans;
+
+const LIGHT_THEME = {
+  algorithm: theme.defaultAlgorithm,
+  token: {
+    colorPrimary: DP.primary, colorLink: DP.primary, colorInfo: DP.primary,
+    colorSuccess: DP.success, colorWarning: DP.warning, colorError: DP.error,
+    colorBgBase: DP.bg, colorBgContainer: DP.surface, colorTextBase: DP.text,
+    colorText: DP.text, colorTextSecondary: DP.textMuted, colorTextTertiary: DP.textDim,
+    colorBorder: DP.border, colorBorderSecondary: DP.border,
+    borderRadius: 8, fontSize: 13, controlHeight: 34, fontFamily: DP.font,
+  },
+  components: {
+    Table: { headerBg: DP.headerBg, headerColor: DP.textMuted, cellPaddingBlock: 14, cellPaddingInline: 16 },
+    Card:  { headerFontSize: 15, paddingLG: 20 },
+    Menu:  { itemSelectedBg: DP.surfaceAlt, itemSelectedColor: DP.text, itemHeight: 34, itemHoverBg: DP.surfaceAlt },
+    Layout:{ headerBg: DP.surface, siderBg: DP.surface, bodyBg: DP.bg },
+    Tag:   { defaultBg: DP.surfaceAlt, defaultColor: DP.textMuted, borderRadiusSM: 4 },
+  },
+};
+
+/* ── Formatting ─────────────────────────────────────────────────────────── */
+const fmtUsd = n => `$${n.toLocaleString(undefined, { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+const fmtNum = n => n.toLocaleString();
+const fmtCompact = n => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+const fmtTrend = (cur, prev) => {
+  if (!prev) return null;
+  const pct = ((cur - prev) / prev) * 100;
+  return `${pct >= 0 ? '+' : '-'}${Math.abs(pct).toFixed(1)}%`;
+};
+const initials = n => n.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join('');
+const copy = text => navigator.clipboard.writeText(text).then(() => message.success('Copied'));
+
+/* ── API ────────────────────────────────────────────────────────────────── */
+const api = async (path, { method = 'GET', body } = {}) => {
+  const r = await fetch(path, { method, headers: { 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
+  if (r.status === 401) { window.dispatchEvent(new Event('signed-out')); throw new Error('Signed out'); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
+  return data;
+};
+const useApi = path => {
+  const [state, setState] = useState({});
+  const reload = useCallback(() => {
+    setState(s => ({ data: s.data }));
+    api(path).then(data => setState({ data }), error => setState({ error }));
+  }, [path]);
+  useEffect(() => { setState({}); reload(); }, [reload]);
+  return { ...state, reload };
+};
+const Loaded = ({ state, children }) => state.error
+  ? <Card bordered style={{ borderColor: DP.border }}><Result status="warning" title="Could not load this data"
+      subTitle={state.error.message} extra={<Button onClick={state.reload}>Try again</Button>} /></Card>
+  : state.data === undefined ? <Card bordered style={{ borderColor: DP.border }}><Skeleton active /></Card>
+  : children(state.data);
+
+/* ── Primitives ─────────────────────────────────────────────────────────── */
+const IconChip = ({ icon, bg, color, size = 40, radius = 10, fontSize = 19 }) => (
+  <span style={{ width: size, height: size, borderRadius: radius, flex: 'none',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    background: bg, color, fontSize }}>{icon}</span>
+);
+
+const BrandMark = ({ name, size = 28 }) => (
+  <div style={{ width: size, height: size, borderRadius: size / 4, background: DP.primary, color: DP.gold, flex: 'none',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: size * 0.47 }}>
+    {name.trim()[0]?.toUpperCase()}</div>
+);
+
+const PageHeader = ({ icon, title, description, extra }) => (
+  <Flex justify="space-between" align="center" gap={16}>
+    <Flex gap={12} align="center">
+      {icon && <IconChip icon={icon} bg={DP.primarySoft} color={DP.primary} />}
+      <div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: DP.text, letterSpacing: '-0.01em' }}>{title}</div>
+        {description && <div style={{ fontSize: 12.5, color: DP.textMuted, marginTop: 2 }}>{description}</div>}
+      </div>
+    </Flex>
+    {extra}
+  </Flex>
+);
+
+const SectionCard = ({ title, extra, children, style, bodyPad = 0 }) => (
+  <Card title={title} extra={extra} bordered style={{ borderColor: DP.border, ...style }}
+    bodyStyle={{ padding: bodyPad }}>{children}</Card>
+);
+
+const StatTile = ({ label, value, trend, sub, icon, iconBg, iconColor }) => {
+  const down = trend && trend.startsWith('-');
+  return (
+    <Card bordered style={{ borderColor: DP.border }} bodyStyle={{ padding: 20 }}>
+      <Flex vertical gap={6}>
+        <Flex justify="space-between" align="flex-start">
+          <Text style={{ fontSize: 12, fontWeight: 600, color: DP.textMuted }}>{label}</Text>
+          {icon && <IconChip icon={icon} bg={iconBg} color={iconColor} size={30} radius={8} fontSize={15} />}
+        </Flex>
+        <Flex align="baseline" gap={8}>
+          <span style={{ fontSize: 26, fontWeight: 700, color: DP.text, letterSpacing: '-0.01em' }}>{value}</span>
+          {trend && (
+            <Flex align="center" gap={2} style={{ fontSize: 12, fontWeight: 600, lineHeight: 1,
+                    color: down ? DP.error : DP.success }}>
+              {down ? <icons.ArrowDownOutlined style={{ fontSize: 10 }} /> : <icons.ArrowUpOutlined style={{ fontSize: 10 }} />}
+              {trend.replace(/^[+-]/, '')}
+            </Flex>
+          )}
+        </Flex>
+        {sub && <Text style={{ fontSize: 11, color: DP.textDim }}>{sub}</Text>}
+      </Flex>
+    </Card>
+  );
+};
+
+const CodeBlock = ({ children, label }) => (
+  <div style={{ background: DP.headerBg, border: `1px solid ${DP.border}`, borderRadius: 8, overflow: 'hidden' }}>
+    <Flex justify="space-between" align="center" style={{ height: 32, padding: '0 12px', borderBottom: `1px solid ${DP.border}` }}>
+      <Text style={{ fontSize: 11, fontWeight: 700, color: DP.textDim, letterSpacing: '0.04em' }}>{label || 'CODE'}</Text>
+      <Button size="small" type="text" icon={<icons.CopyOutlined />} style={{ color: DP.textMuted }} onClick={() => copy(children)} />
+    </Flex>
+    <pre style={{ margin: 0, padding: '14px 16px', overflowX: 'auto', whiteSpace: 'pre-wrap',
+                  fontFamily: DP.fontMono, fontSize: 12.5, color: DP.text, lineHeight: 1.7 }}>{children}</pre>
+  </div>
+);
+
+const KeyPill = ({ value }) => (
+  <Flex align="center" gap={8} style={{ background: DP.headerBg, border: `1px solid ${DP.border}`,
+    borderRadius: 8, padding: '4px 10px', width: 'fit-content', maxWidth: '100%' }}>
+    <Text style={{ fontFamily: DP.fontMono, fontSize: 12, color: DP.textMuted, wordBreak: 'break-all' }}>{value}</Text>
+    <Button size="small" type="text" icon={<icons.CopyOutlined />} style={{ color: DP.textMuted }} onClick={() => copy(value)} />
+  </Flex>
+);
+
+const STATUS_META = {
+  active:    { color: DP.success, label: 'Active' },
+  exhausted: { color: DP.warning, label: 'Exhausted' },
+  available: { color: DP.success, label: 'Available' },
+};
+const StatusTag = ({ status }) => {
+  const s = STATUS_META[status] || { color: DP.textDim, label: status || 'Unknown' };
+  return (
+    <Flex align="center" gap={6}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.color, flexShrink: 0 }} />
+      <Text style={{ fontSize: 12.5, color: DP.text, textTransform: STATUS_META[status] ? 'none' : 'capitalize' }}>{s.label}</Text>
+    </Flex>
+  );
+};
+
+/* Spend in the current period vs usage_limit.credit_limit, colored past the alert threshold. */
+const BudgetCell = ({ spend, limit, alert }) => {
+  const pct = Math.round((spend / limit) * 100);
+  const color = pct >= 100 ? DP.error : pct >= alert ? DP.warning : DP.chartGreen;
+  return (
+    <Flex vertical gap={4} style={{ minWidth: 150 }}>
+      <Text style={{ fontSize: 12.5, color: DP.text }}>
+        {fmtUsd(spend)} <Text style={{ color: DP.textDim }}>/ {fmtUsd(limit)}</Text>
+      </Text>
+      <Progress percent={Math.min(pct, 100)} showInfo={false} size="small" strokeColor={color} trailColor={DP.chartGrid} />
+    </Flex>
+  );
+};
+
+/* ── Get Started ────────────────────────────────────────────────────────── */
+const RevealKeyPill = ({ full }) => {
+  const [shown, setShown] = useState(false);
+  return (
+    <Flex align="center" gap={8} style={{ background: DP.headerBg, border: `1px solid ${DP.border}`,
+      borderRadius: 8, padding: '5px 10px', width: 'fit-content', maxWidth: '100%' }}>
+      <Text style={{ fontFamily: DP.fontMono, fontSize: 12, color: DP.textMuted, wordBreak: 'break-all' }}>
+        {shown ? full : `${full.slice(0, 8)}${'•'.repeat(18)}`}</Text>
+      <Button size="small" type="text" onClick={() => setShown(v => !v)} style={{ color: DP.textMuted }}
+        icon={shown ? <icons.EyeInvisibleOutlined /> : <icons.EyeOutlined />} />
+      <Button size="small" type="text" icon={<icons.CopyOutlined />} style={{ color: DP.textMuted }} onClick={() => copy(full)} />
+    </Flex>
+  );
+};
+
+const GsStep = ({ index, total, title, description, done, active, locked, children }) => (
+  <Flex gap={16} align="stretch">
+    <Flex vertical align="center" style={{ flex: 'none', width: 32 }}>
+      <div style={{ width: 32, height: 32, borderRadius: 16, flex: 'none', fontWeight: 700, fontSize: 13,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: done ? DP.success : active ? DP.primary : DP.surface,
+                    color: done || active ? '#fff' : DP.textDim,
+                    border: done || active ? 'none' : `1px solid ${DP.border}` }}>
+        {done ? <icons.CheckOutlined /> : index}
+      </div>
+      {index < total && <div style={{ flex: 1, width: 2, minHeight: 28, marginTop: 4,
+                                       background: done ? DP.success : DP.border }} />}
+    </Flex>
+    <div style={{ flex: 1, minWidth: 0, paddingBottom: 24 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: DP.text }}>{title}</div>
+      <div style={{ fontSize: 12.5, color: DP.textMuted, marginTop: 2, marginBottom: 12 }}>{description}</div>
+      <Card bordered style={{ borderColor: DP.border, opacity: locked ? 0.55 : 1,
+                              pointerEvents: locked ? 'none' : 'auto' }} bodyStyle={{ padding: 20 }}>
+        {children}
+      </Card>
+    </div>
+  </Flex>
+);
+
+const NextStepCard = ({ icon, iconBg, iconColor, title, desc, link, href, onClick }) => (
+  <Card bordered hoverable onClick={href ? () => window.open(href, '_blank', 'noopener') : onClick}
+    style={{ borderColor: DP.border, height: '100%' }} bodyStyle={{ padding: 20 }}>
+    <Flex vertical gap={10} style={{ height: '100%' }}>
+      <IconChip icon={icon} bg={iconBg} color={iconColor} size={36} radius={9} fontSize={17} />
+      <div style={{ fontSize: 14, fontWeight: 700, color: DP.text }}>{title}</div>
+      <div style={{ fontSize: 12.5, color: DP.textMuted, flex: 1, lineHeight: 1.5 }}>{desc}</div>
+      <Flex align="center" gap={6} style={{ fontSize: 12.5, fontWeight: 600, color: DP.primary }}>
+        {link} {href ? <icons.ExportOutlined style={{ fontSize: 11 }} /> : <icons.ArrowRightOutlined style={{ fontSize: 11 }} />}
+      </Flex>
+    </Flex>
+  </Card>
+);
+
+const GuideCard = ({ grad, pill, title, desc, href }) => (
+  <Card bordered hoverable={!!href} onClick={href ? () => window.open(href, '_blank', 'noopener') : undefined}
+    style={{ borderColor: DP.border, height: '100%', overflow: 'hidden' }} bodyStyle={{ padding: 0 }}>
+    <div style={{ height: 84, background: grad }} />
+    <div style={{ padding: 16 }}>
+      <Tag style={{ marginBottom: 8 }}>{pill}</Tag>
+      <div style={{ fontSize: 13.5, fontWeight: 700, color: DP.text }}>{title}</div>
+      <div style={{ fontSize: 12, color: DP.textMuted, marginTop: 4, lineHeight: 1.5 }}>{desc}</div>
+    </div>
+  </Card>
+);
+
+const GetStartedPage = ({ ws, me, onNavigate }) => {
+  const { config } = me;
+  const keys = useApi(`/api/w/${ws.id}/keys`);
+  const catalog = useApi(`/api/w/${ws.id}/catalog`);
+  const [fullKey, setFullKey] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const [reqState, setReqState] = useState('idle');   // idle | listening | done
+
+  // Poll my usage until a first request shows up (analytics can lag by a minute or two).
+  useEffect(() => {
+    if (reqState !== 'listening') return;
+    let tries = 0;
+    const check = () => api(`/api/w/${ws.id}/overview?scope=me`)
+      .then(o => { if (o.requests > 0) setReqState('done'); else if (++tries >= 36) setReqState('idle'); })
+      .catch(() => setReqState('idle'));
+    check();
+    const t = setInterval(check, 5000);
+    return () => clearInterval(t);
+  }, [reqState, ws.id]);
+
+  const hasKey = !!fullKey || (keys.data?.length > 0);
+  const step1Done = hasKey, step2Done = reqState === 'done';
+  const stepsDone = (step1Done ? 1 : 0) + (step2Done ? 1 : 0);
+  const pct = Math.round((stepsDone / 2) * 100);
+  const genKey = () => {
+    setGenerating(true);
+    api(`/api/w/${ws.id}/keys`, { method: 'POST', body: { name: 'my-first-key', env: 'Development' } })
+      .then(r => { setFullKey(r.full); keys.reload(); })
+      .catch(e => message.error(e.message))
+      .finally(() => setGenerating(false));
+  };
+  const model = catalog.data?.models[0]?.id || '@provider/model';
+  const curl = `curl ${config.gatewayUrl}/chat/completions \\
+  -H "x-portkey-api-key: ${fullKey || 'YOUR_API_KEY'}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${model}",
+    "messages": [{ "role": "user", "content": "Hello from the developer portal!" }]
+  }'`;
+
+  return (
+    <Flex vertical gap={20}>
+      <div style={{ borderRadius: 12, border: `1px solid ${DP.border}`, overflow: 'hidden',
+                    background: `linear-gradient(120deg, ${DP.primarySoft} 0%, #F3ECF5 52%, ${DP.surface} 100%)` }}>
+        <Flex justify="space-between" align="center" gap={24} style={{ padding: 28 }}>
+          <div style={{ maxWidth: 640 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: DP.text, letterSpacing: '-0.01em' }}>
+              👋 Hi {me.user.name.split(' ')[0]}, welcome to the {config.portalName}
+            </div>
+            <div style={{ fontSize: 13.5, color: DP.textMuted, marginTop: 8, lineHeight: 1.55 }}>
+              Make your first governed AI request in two steps. Model access, rate limits, and
+              guardrails are managed for you in {config.adminConsoleName}.
+            </div>
+            {config.docsUrl && (
+              <Space size={20} style={{ marginTop: 16 }} wrap>
+                <Button type="link" href={config.docsUrl} target="_blank" icon={<icons.ReadOutlined />}
+                  style={{ padding: 0, height: 'auto' }}>Developer docs</Button>
+              </Space>
+            )}
+          </div>
+          <Flex vertical align="center" gap={6} style={{ flex: 'none' }}>
+            <Progress type="circle" percent={pct} size={96} strokeColor={DP.primary} trailColor={DP.chartGrid}
+              format={p => <span style={{ fontSize: 20, fontWeight: 700, color: DP.text }}>{p}%</span>} />
+            <Text style={{ fontSize: 12, color: DP.textMuted }}>{stepsDone} of 2 steps complete</Text>
+          </Flex>
+        </Flex>
+      </div>
+
+      <div>
+        <GsStep index={1} total={2} title="Create your API key" done={step1Done} active={!step1Done}
+          description="Authenticate every request to the gateway.">
+          {fullKey ? (
+            <Flex vertical gap={12}>
+              <Flex align="center" gap={8}>
+                <icons.CheckCircleFilled style={{ color: DP.success, fontSize: 16 }} />
+                <Text strong style={{ fontSize: 14 }}>Your API key is ready</Text>
+              </Flex>
+              <Text style={{ fontSize: 12.5, color: DP.textMuted }}>Copy it now — for security the full value is shown only once.</Text>
+              <RevealKeyPill full={fullKey} />
+            </Flex>
+          ) : hasKey ? (
+            <Flex justify="space-between" align="center" gap={16}>
+              <Flex align="center" gap={8}>
+                <icons.CheckCircleFilled style={{ color: DP.success, fontSize: 16 }} />
+                <Text strong style={{ fontSize: 14 }}>You already have an API key in this workspace</Text>
+              </Flex>
+              <Button onClick={() => onNavigate('keys')}>Manage keys</Button>
+            </Flex>
+          ) : (
+            <Flex justify="space-between" align="center" gap={16}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: DP.text }}>Generate your API key</div>
+                <div style={{ fontSize: 12.5, color: DP.textMuted, marginTop: 4, maxWidth: 540, lineHeight: 1.5 }}>
+                  Use this to authenticate every request. It inherits your workspace's governed
+                  models and rate limits automatically.
+                </div>
+              </div>
+              <Button type="primary" icon={<icons.KeyOutlined />} loading={generating || keys.data === undefined}
+                onClick={genKey} style={{ flex: 'none' }}>{generating ? 'Generating…' : 'Generate API key'}</Button>
+            </Flex>
+          )}
+        </GsStep>
+
+        <GsStep index={2} total={2} title="Make your first request" done={step2Done}
+          active={step1Done && !step2Done} locked={!step1Done}
+          description="Call the gateway from your app, then confirm it in your usage.">
+          <Flex vertical gap={14}>
+            <Flex justify="space-between" align="center" gap={12}>
+              {reqState === 'done' ? (
+                <Flex align="center" gap={8}>
+                  <icons.CheckCircleFilled style={{ color: DP.success, fontSize: 16 }} />
+                  <Text strong style={{ fontSize: 13.5 }}>Request received</Text>
+                </Flex>
+              ) : reqState === 'listening' ? (
+                <Flex align="center" gap={8}>
+                  <Spin size="small" />
+                  <Text style={{ fontSize: 12.5, color: DP.textMuted }}>Listening for requests from your app…</Text>
+                </Flex>
+              ) : (
+                <Text style={{ fontSize: 12.5, color: DP.textMuted }}>Send a request with your key to finish setup.</Text>
+              )}
+              {reqState !== 'done' && (
+                <Button type="link" size="small" style={{ padding: 0, height: 'auto' }}
+                  onClick={() => setReqState('done')}>Skip this step</Button>
+              )}
+            </Flex>
+            <CodeBlock label="POST /v1/chat/completions">{curl}</CodeBlock>
+            <Flex gap={8}>
+              <Button icon={<icons.PlayCircleOutlined />} loading={reqState === 'listening'}
+                onClick={() => setReqState('listening')}>Check for my request</Button>
+              <Button type="primary" icon={<icons.CopyOutlined />} onClick={() => copy(curl)}>Copy to integrate</Button>
+            </Flex>
+            {reqState === 'done' && (
+              <div style={{ borderRadius: 10, border: `1px solid ${DP.border}`, padding: 16,
+                            background: `linear-gradient(120deg, ${DP.primarySoft}, #F3ECF5)` }}>
+                <Flex align="center" gap={12}>
+                  <IconChip icon={<icons.CheckOutlined />} bg={DP.success} color="#fff" size={32} radius={16} fontSize={15} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: DP.text }}>That was easy!</div>
+                    <div style={{ fontSize: 12.5, color: DP.textMuted, marginTop: 2, lineHeight: 1.5 }}>
+                      Your requests count toward your usage — see spend and requests in My Overview.
+                    </div>
+                  </div>
+                  <Button type="primary" style={{ flex: 'none' }} onClick={() => onNavigate('overview')}>View my overview →</Button>
+                </Flex>
+              </div>
+            )}
+          </Flex>
+        </GsStep>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: DP.text }}>Crucial next steps</div>
+        <div style={{ fontSize: 12.5, color: DP.textMuted, marginTop: 2, marginBottom: 14 }}>
+          Take your app to production and scale it with confidence.
+        </div>
+        <Row gutter={[16, 16]}>
+          <Col span={12}><NextStepCard icon={<icons.KeyOutlined />} iconBg={DP.primarySoft} iconColor={DP.primary}
+            title="Set a budget & rate limit per key" link="Manage API keys" onClick={() => onNavigate('keys')}
+            desc="Give each key its own monthly budget and rate limit, and rotate it when you need to." /></Col>
+          <Col span={12}><NextStepCard icon={<icons.DollarOutlined />} iconBg={DP.successSoft} iconColor={DP.success}
+            title="Track spend against budget" link="View my overview" onClick={() => onNavigate('overview')}
+            desc="Watch usage and cost against your budget, with an alert before you hit the limit." /></Col>
+          <Col span={12}><NextStepCard icon={<icons.SafetyCertificateOutlined />} iconBg={DP.infoSoft} iconColor={DP.info}
+            title="Guardrails on every request" link={`Manage in ${config.adminConsoleName}`} href={config.adminConsoleUrl}
+            desc="PII redaction, prompt-injection defense, and content policies run automatically on every call." /></Col>
+          <Col span={12}><NextStepCard icon={<icons.AppstoreOutlined />} iconBg="#F3E8FF" iconColor="#7733FF"
+            title="Explore governed models" link="View catalog" onClick={() => onNavigate('catalog')}
+            desc="See every approved model and MCP server, with pricing, for your workspace." /></Col>
+        </Row>
+      </div>
+
+      <div>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: DP.text }}>Guides</div>
+          <div style={{ fontSize: 12.5, color: DP.textMuted, marginTop: 2 }}>Recipes to get you going.</div>
+        </div>
+        <Row gutter={[16, 16]}>
+          <Col span={8}><GuideCard grad="linear-gradient(120deg, #E0F6FA, #D8EFDA)" pill="Recipe" href={config.docsUrl}
+            title="Summarize a document" desc="Call the gateway to summarize a long document in a single request." /></Col>
+          <Col span={8}><GuideCard grad="linear-gradient(120deg, #E8ECFF, #F3E8FF)" pill="Recipe" href={config.docsUrl}
+            title="Batch document extraction" desc="Extract structured fields from PDFs at scale while respecting rate limits." /></Col>
+          <Col span={8}><GuideCard grad="linear-gradient(120deg, #FFF2E0, #FDE8ED)" pill="Guide" href={config.docsUrl}
+            title="Add fallbacks & retries" desc="Keep your app resilient when a provider is slow or unavailable." /></Col>
+        </Row>
+      </div>
+    </Flex>
+  );
+};
+
+/* ── Overview ───────────────────────────────────────────────────────────── */
+const CostChart = ({ data }) => (
+  <ResponsiveContainer width="100%" height={280}>
+    <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+      <CartesianGrid stroke={DP.chartGrid} vertical={false} />
+      <XAxis dataKey="date" tick={{ fontSize: 11, fill: DP.textDim }} axisLine={{ stroke: DP.border }} tickLine={false} />
+      <YAxis yAxisId="l" tick={{ fontSize: 11, fill: DP.textDim }} axisLine={false} tickLine={false} />
+      <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11, fill: DP.textDim }} axisLine={false} tickLine={false} />
+      <RTooltip contentStyle={{ fontSize: 12, border: `1px solid ${DP.border}`, borderRadius: 8, background: DP.surface }} />
+      <Legend wrapperStyle={{ fontSize: 12 }} />
+      <Line yAxisId="l" type="monotone" dataKey="requests" name="Requests" stroke={DP.chartBlue} strokeWidth={2} dot={false} />
+      <Line yAxisId="r" type="monotone" dataKey="cost" name="Cost (USD)" stroke={DP.chartGreen} strokeWidth={2} dot={false} />
+    </LineChart>
+  </ResponsiveContainer>
+);
+
+const OverviewPage = ({ ws, me, scope }) => {
+  const workspace = scope === 'workspace';
+  const overview = useApi(`/api/w/${ws.id}/overview?scope=${workspace ? 'workspace' : 'me'}`);
+  const keys = useApi(`/api/w/${ws.id}/keys?scope=${workspace ? 'all' : 'mine'}`);
+  const activeKeys = keys.data ? keys.data.filter(k => k.status === 'active').length : '—';
+  return (
+    <Flex vertical gap={16}>
+      <PageHeader icon={<icons.DashboardOutlined />} title={workspace ? 'Overview' : 'My Overview'}
+        description={workspace
+          ? `Usage and cost across everyone in this workspace. Access controls stay in ${me.config.adminConsoleName}.`
+          : `Your usage, cost, and keys. Governed models and guardrails stay in ${me.config.adminConsoleName}.`} />
+      <Loaded state={overview}>{o => (
+        <Flex vertical gap={16}>
+          <Row gutter={16}>
+            <Col span={8}><StatTile label="Spend (30d)" value={fmtUsd(o.spend)} trend={fmtTrend(o.spend, o.spendPrev)} sub="vs. prior 30d"
+              icon={<icons.DollarOutlined />} iconBg={DP.successSoft} iconColor={DP.success} /></Col>
+            <Col span={8}><StatTile label="Requests (30d)" value={fmtCompact(o.requests)} trend={fmtTrend(o.requests, o.requestsPrev)} sub="vs. prior 30d"
+              icon={<icons.SwapOutlined />} iconBg={DP.infoSoft} iconColor={DP.info} /></Col>
+            <Col span={8}><StatTile label={workspace ? 'Active keys' : 'My active keys'} value={activeKeys}
+              sub="in this workspace" icon={<icons.KeyOutlined />} iconBg={DP.primarySoft} iconColor={DP.primary} /></Col>
+          </Row>
+          <SectionCard title="Requests & cost, last 30 days">
+            <div style={{ padding: 20 }}>
+              {o.series.length ? <CostChart data={o.series.map(p => ({ ...p, date: dayjs(p.timestamp).format('MMM D'), cost: +p.cost.toFixed(2) }))} />
+                : <Empty description="No requests in the last 30 days" />}
+            </div>
+          </SectionCard>
+        </Flex>
+      )}</Loaded>
+    </Flex>
+  );
+};
+
+/* ── API Keys ───────────────────────────────────────────────────────────── */
+const OnceKeyView = ({ full, note, onDone }) => (
+  <Flex vertical gap={16} style={{ marginTop: 8 }}>
+    <Alert type="warning" showIcon message="Copy this key now. For security the full value is shown only once." description={note} />
+    <KeyPill value={full} />
+    <Flex justify="end"><Button type="primary" onClick={onDone}>Done</Button></Flex>
+  </Flex>
+);
+
+const CreateKeyModal = ({ ws, me, open, forWorkspace, onClose }) => {
+  const [form] = Form.useForm();
+  const [full, setFull] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [members, setMembers] = useState([]);
+  const type = Form.useWatch('type', form);
+
+  useEffect(() => {
+    if (open && forWorkspace) api(`/api/w/${ws.id}/members`).then(ms => setMembers(ms.filter(m => m.email)), () => {});
+  }, [open, forWorkspace, ws.id]);
+
+  const handleCreate = () => form.validateFields().then(v => {
+    setSaving(true);
+    return api(`/api/w/${ws.id}/keys`, { method: 'POST', body: v })
+      .then(r => setFull(r.full)).catch(e => message.error(e.message)).finally(() => setSaving(false));
+  });
+  const reset = () => { const created = !!full; setFull(null); form.resetFields(); onClose(created); };
+
+  return (
+    <Modal open={open} onCancel={reset} footer={null} width={520} title="Create API key" destroyOnClose>
+      {!full ? (
+        <Form form={form} layout="vertical" requiredMark={false} style={{ marginTop: 8 }}
+          initialValues={{ type: 'user', user_id: me.user.id, env: 'Development', rate: 60, unit: 'rpm', alert: 80 }}>
+          {forWorkspace && (
+            <Form.Item name="type" label="Key type">
+              <Radio.Group optionType="button" options={[{ value: 'user', label: 'For a member' }, { value: 'service', label: 'Service key' }]} />
+            </Form.Item>
+          )}
+          {forWorkspace && type !== 'service' && (
+            <Form.Item name="user_id" label="Member">
+              <Select showSearch optionFilterProp="label"
+                options={members.map(m => ({ value: m.id, label: `${m.name} (${m.email})` }))} />
+            </Form.Item>
+          )}
+          <Form.Item name="name" label="Key name" rules={[{ required: true, message: 'Name your key' }, { max: 100 }]}>
+            <Input placeholder="e.g. notebook-experiments" />
+          </Form.Item>
+          <Form.Item name="env" label="Environment">
+            <Radio.Group options={['Development', 'Production']} optionType="button" />
+          </Form.Item>
+          <Flex gap={12}>
+            <Form.Item name="rate" label="Rate limit" style={{ flex: 1 }}>
+              <InputNumber min={1} max={100000} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="unit" label="Per" style={{ width: 120 }}>
+              <Select options={['rpm', 'rps', 'rph', 'rpd'].map(u => ({ value: u, label: u }))} />
+            </Form.Item>
+          </Flex>
+          <Flex gap={12}>
+            <Form.Item name="credit_limit" label="Monthly budget (USD, optional)" style={{ flex: 1 }}>
+              <InputNumber min={1} placeholder="e.g. 1500" prefix="$" style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="alert" label="Alert at (%)" style={{ width: 120 }}>
+              <InputNumber min={1} max={99} style={{ width: '100%' }} />
+            </Form.Item>
+          </Flex>
+          <Text style={{ fontSize: 11.5, color: DP.textDim }}>
+            Governed models and guardrails are inherited from the workspace and managed in {me.config.adminConsoleName}.
+          </Text>
+          <Flex justify="end" gap={8} style={{ marginTop: 20 }}>
+            <Button onClick={reset}>Cancel</Button>
+            <Button type="primary" loading={saving} onClick={handleCreate}>Create key</Button>
+          </Flex>
+        </Form>
+      ) : <OnceKeyView full={full} onDone={reset} />}
+    </Modal>
+  );
+};
+
+const ApiKeysPage = ({ ws, me, scope }) => {
+  const forWorkspace = scope === 'all';
+  const keys = useApi(`/api/w/${ws.id}/keys?scope=${scope}`);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [rotated, setRotated] = useState(null);
+
+  const rotate = k => api(`/api/w/${ws.id}/keys/${encodeURIComponent(k.id)}/rotate`, { method: 'POST' })
+    .then(r => setRotated(r)).catch(e => message.error(e.message));
+  const remove = k => api(`/api/w/${ws.id}/keys/${encodeURIComponent(k.id)}`, { method: 'DELETE' })
+    .then(() => { message.success('Key deleted'); keys.reload(); }).catch(e => message.error(e.message));
+
+  const columns = [
+    { title: 'Name', dataIndex: 'name', render: (v, r) => (
+        <Flex vertical gap={4}><Text strong>{v}</Text>
+          <Tooltip title="For security, the full key is shown only once, at creation. Lost it? Rotate the key.">
+            <Text style={{ fontFamily: DP.fontMono, fontSize: 12, color: DP.textDim, cursor: 'default' }}>{r.key}</Text>
+          </Tooltip>
+        </Flex>) },
+    forWorkspace && { title: 'Owner', dataIndex: 'owner', render: (v, r) =>
+        r.type === 'service' ? <Tag color="purple">Service</Tag> : <Text>{v}</Text> },
+    { title: 'Environment', dataIndex: 'env', render: v => v || <Text style={{ color: DP.textDim }}>—</Text> },
+    { title: 'Rate limit', dataIndex: 'rate_limit', render: rl => rl ? `${fmtNum(rl.value)} ${rl.unit}` : <Text style={{ color: DP.textDim }}>Workspace default</Text> },
+    { title: 'Monthly budget', dataIndex: 'usage_limit', render: (ul, r) =>
+        !ul ? <Text style={{ color: DP.textDim }}>No limit</Text>
+        : ul.type === 'cost' ? <BudgetCell spend={r.spend} limit={ul.credit_limit} alert={ul.alert_pct} />
+        : <Text>{fmtNum(ul.credit_limit)} tokens</Text> },
+    { title: 'Created', dataIndex: 'created_at', render: v => v ? dayjs(v).format('MMM D, YYYY') : '—' },
+    { title: 'Status', dataIndex: 'status', render: s => <StatusTag status={s} /> },
+    { title: '', key: 'actions', width: 110, render: (_, r) => (
+        <Space size={4}>
+          <Popconfirm title="Rotate this key?" description="You get a new secret. The old one keeps working for a short time."
+            okText="Rotate" onConfirm={() => rotate(r)}>
+            <Tooltip title="Rotate"><Button size="small" type="text" icon={<icons.RedoOutlined />} style={{ color: DP.textMuted }} /></Tooltip>
+          </Popconfirm>
+          <Popconfirm title="Delete this key?" description="Anything using it stops working immediately."
+            okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => remove(r)}>
+            <Tooltip title="Delete"><Button size="small" danger type="text" icon={<icons.DeleteOutlined />} /></Tooltip>
+          </Popconfirm>
+        </Space>) },
+  ].filter(Boolean);
+
+  return (
+    <Flex vertical gap={16}>
+      <PageHeader icon={<icons.KeyOutlined />} title={forWorkspace ? 'Workspace Keys' : 'My API Keys'}
+        description={forWorkspace
+          ? 'Every key in this workspace. Create keys for members, or service keys for apps and pipelines.'
+          : 'Create, rotate, and delete your own keys. Rate limit and monthly budget are set per key.'} />
+      <SectionCard title={forWorkspace ? 'All keys' : 'Your API keys'} extra={
+        <Button type="primary" icon={<icons.PlusOutlined />} onClick={() => setModalOpen(true)}>Create API key</Button>}>
+        <Loaded state={keys}>{data => (
+          <Table dataSource={data} columns={columns} rowKey="id" pagination={false}
+            locale={{ emptyText: <Empty description="No keys yet" /> }} />
+        )}</Loaded>
+      </SectionCard>
+      <CreateKeyModal ws={ws} me={me} open={modalOpen} forWorkspace={forWorkspace}
+        onClose={created => { setModalOpen(false); if (created) keys.reload(); }} />
+      <Modal open={!!rotated} onCancel={() => { setRotated(null); keys.reload(); }} footer={null} width={520} title="Key rotated">
+        {rotated && <OnceKeyView full={rotated.full} onDone={() => { setRotated(null); keys.reload(); }}
+          note={rotated.old_key_expires_at && `The old key stops working ${dayjs(rotated.old_key_expires_at).format('MMM D, h:mm A')}.`} />}
+      </Modal>
+    </Flex>
+  );
+};
+
+/* ── Members (manager) ──────────────────────────────────────────────────── */
+const AVATARS = [{ bg: '#FFF2E0', color: '#AE5800' }, { bg: '#E8ECFF', color: '#3355FF' },
+  { bg: '#D8EFDA', color: '#1E7C3B' }, { bg: '#F3E8FF', color: '#7733FF' }, { bg: '#E0F6FA', color: '#0093E0' }];
+const avatarFor = n => AVATARS[[...n].reduce((s, c) => s + c.charCodeAt(0), 0) % AVATARS.length];
+
+const MembersPage = ({ ws }) => {
+  const members = useApi(`/api/w/${ws.id}/members`);
+  const columns = [
+    { title: 'Member', dataIndex: 'name', render: (v, r) => {
+        const a = avatarFor(v);
+        return <Flex align="center" gap={8}>
+          <Avatar size={26} style={{ background: r.email ? a.bg : DP.headerBg, color: r.email ? a.color : DP.textDim, fontWeight: 700, fontSize: 12 }}>
+            {r.email ? initials(v) : <icons.ApiOutlined />}</Avatar>
+          <Flex vertical><Text strong>{v}</Text>
+            {r.email && <Text style={{ fontSize: 11.5, color: DP.textDim }}>{r.email}</Text>}</Flex></Flex>;
+      } },
+    { title: 'Role', dataIndex: 'role', render: v => v ? <Tag color={v === 'member' ? 'default' : 'blue'}>{v[0].toUpperCase() + v.slice(1)}</Tag> : null },
+    { title: 'Requests (30d)', dataIndex: 'requests', render: fmtNum, sorter: (a, b) => a.requests - b.requests },
+    { title: 'Spend (30d)', dataIndex: 'cost', render: fmtUsd, sorter: (a, b) => a.cost - b.cost, defaultSortOrder: 'descend' },
+  ];
+  return (
+    <Flex vertical gap={16}>
+      <PageHeader icon={<icons.TeamOutlined />} title="Members"
+        description={`Usage and cost per member in ${ws.name}, for troubleshooting and reporting.`} />
+      <SectionCard title={`All members in ${ws.name}`}>
+        <Loaded state={members}>{data => <Table dataSource={data} columns={columns} rowKey="id" pagination={false} />}</Loaded>
+      </SectionCard>
+    </Flex>
+  );
+};
+
+/* ── Catalog (read-only registry) ───────────────────────────────────────── */
+const price = v => v == null ? <Text style={{ color: DP.textDim }}>—</Text> : fmtUsd(v);
+
+const ModelsTable = ({ models }) => {
+  const cols = [
+    { title: 'Model', dataIndex: 'id', render: v => <Text copyable style={{ fontFamily: DP.fontMono, fontSize: 12.5, fontWeight: 600 }}>{v}</Text> },
+    { title: 'Provider', dataIndex: 'provider', render: v => <Tag>{v}</Tag> },
+    { title: 'Input / 1M tokens', dataIndex: 'input', align: 'right', render: price },
+    { title: 'Output / 1M tokens', dataIndex: 'output', align: 'right', render: price },
+    { title: 'Status', dataIndex: 'id', key: 's', render: () => <StatusTag status="available" /> },
+  ];
+  return <SectionCard title={`${models.length} governed models`}>
+    <Table dataSource={models} columns={cols} rowKey="id" pagination={false} /></SectionCard>;
+};
+
+const McpTable = ({ servers }) => {
+  const cols = [
+    { title: 'Server', dataIndex: 'name', render: (v, r) => (
+        <Flex vertical gap={2}><Text strong>{v}</Text>
+          <Text style={{ fontSize: 12, color: DP.textMuted }}>{r.description}</Text></Flex>) },
+    { title: 'Auth', dataIndex: 'auth_type', render: v => v ? <Tag>{v}</Tag> : null },
+    { title: 'Gateway URL', dataIndex: 'url', render: v => (
+        <Text copyable={!!v} style={{ fontFamily: DP.fontMono, fontSize: 12, color: DP.textMuted }}>{v}</Text>) },
+    { title: 'Status', dataIndex: 'status', render: s => <StatusTag status={s === 'active' ? 'available' : s} /> },
+  ];
+  return <SectionCard title={`${servers.length} MCP servers`}>
+    <Table dataSource={servers} columns={cols} rowKey="slug" pagination={false} /></SectionCard>;
+};
+
+const CatalogPage = ({ ws, me }) => {
+  const [tab, setTab] = useState('models');
+  const catalog = useApi(`/api/w/${ws.id}/catalog`);
+  return (
+    <Flex vertical gap={16}>
+      <PageHeader icon={<icons.AppstoreOutlined />} title="Catalog"
+        description={`Models and MCP servers approved for this workspace. Availability is governed in ${me.config.adminConsoleName}.`} />
+      <Segmented value={tab} onChange={setTab} size="large" style={{ alignSelf: 'flex-start' }}
+        options={[{ label: 'Models', value: 'models' }, { label: 'MCP servers', value: 'mcp' }]} />
+      <Loaded state={catalog}>{c => tab === 'models' ? <ModelsTable models={c.models} /> : <McpTable servers={c.mcpServers} />}</Loaded>
+    </Flex>
+  );
+};
+
+/* ── Shell ──────────────────────────────────────────────────────────────── */
+const MEMBER_NAV = [{ group: 'My workspace', items: [
+  { key: 'start', label: 'Get Started', icon: <icons.RocketOutlined /> },
+  { key: 'overview', label: 'My Overview', icon: <icons.DashboardOutlined /> },
+  { key: 'keys', label: 'My API Keys', icon: <icons.KeyOutlined /> },
+  { key: 'catalog', label: 'Catalog', icon: <icons.AppstoreOutlined /> },
+] }];
+const MANAGER_NAV = [
+  { group: 'Workspace', items: [
+    { key: 'overview', label: 'Overview', icon: <icons.DashboardOutlined /> },
+    { key: 'members', label: 'Members', icon: <icons.TeamOutlined /> },
+    { key: 'wskeys', label: 'Workspace Keys', icon: <icons.SafetyOutlined /> },
+    { key: 'catalog', label: 'Catalog', icon: <icons.AppstoreOutlined /> },
+  ] },
+  { group: 'My workspace', items: [
+    { key: 'start', label: 'Get Started', icon: <icons.RocketOutlined /> },
+    { key: 'keys', label: 'My API Keys', icon: <icons.KeyOutlined /> },
+  ] },
+];
+
+const roleTag = (role, long) => (
+  <Tag color={role === 'manager' ? 'blue' : 'default'}
+    style={long ? { fontSize: 10, lineHeight: '14px', padding: '0 6px', marginInlineEnd: 0 } : { marginInlineEnd: 0 }}>
+    {role === 'manager' ? (long ? 'Workspace manager' : 'Manager') : 'Member'}</Tag>
+);
+
+const WorkspaceSwitcher = ({ ws, workspaces, onChange }) => (
+  <Dropdown trigger={['click']} menu={{
+    items: workspaces.map(w => ({ key: w.id, label: (
+      <Flex justify="space-between" align="center" gap={24}><span>{w.name}</span>{roleTag(w.role)}</Flex>) })),
+    onClick: ({ key }) => onChange(key) }}>
+    <Button block style={{ height: 'auto', padding: '8px 10px', background: DP.headerBg, borderColor: DP.border }}>
+      <Flex justify="space-between" align="center" style={{ width: '100%' }}>
+        <Flex vertical align="flex-start" gap={3}>
+          <Space size={6}><icons.AppstoreOutlined style={{ fontSize: 12, color: DP.textMuted }} />
+            <Text strong style={{ fontSize: 12.5 }}>{ws.name}</Text></Space>
+          {roleTag(ws.role, true)}
+        </Flex>
+        <icons.DownOutlined style={{ fontSize: 10, color: DP.textDim }} />
+      </Flex>
+    </Button>
+  </Dropdown>
+);
+
+const Sidebar = ({ me, ws, onWorkspaceChange, active, onNavSelect }) => {
+  const nav = ws.role === 'manager' ? MANAGER_NAV : MEMBER_NAV;
+  const items = nav.flatMap(g => [{ key: `g-${g.group}`, type: 'group', label: g.group },
+    ...g.items.map(n => ({ key: n.key, icon: n.icon, label: n.label }))]);
+  const a = avatarFor(me.user.name);
+  const { adminConsoleName, adminConsoleUrl, portalName } = me.config;
+  return (
+    <Layout.Sider width={232} style={{ background: DP.surface, borderRight: `1px solid ${DP.border}` }}>
+      <Flex vertical style={{ height: '100%' }}>
+        <Flex align="center" gap={10} style={{ padding: '18px 16px' }}>
+          <BrandMark name={portalName} />
+          <Text strong style={{ fontSize: 13.5 }}>{portalName}</Text>
+        </Flex>
+        <div style={{ padding: '0 12px 12px' }}>
+          <WorkspaceSwitcher ws={ws} workspaces={me.workspaces} onChange={onWorkspaceChange} />
+        </div>
+        <Menu mode="inline" selectedKeys={[active]} style={{ borderInlineEnd: 'none', flex: 1 }}
+          items={items} onClick={({ key }) => onNavSelect(key)} />
+        <Flex vertical gap={12} style={{ padding: 16, borderTop: `1px solid ${DP.border}` }}>
+          <Tooltip title={`Guardrails, policies, and access controls are administered in ${adminConsoleName}`}>
+            <Flex align="center" justify="space-between" gap={8}
+              onClick={() => adminConsoleUrl && window.open(adminConsoleUrl, '_blank', 'noopener')}
+              style={{ padding: '8px 10px', border: `1px solid ${DP.border}`, borderRadius: 8, background: DP.surfaceAlt,
+                       cursor: adminConsoleUrl ? 'pointer' : 'default' }}>
+              <Flex align="center" gap={8} style={{ minWidth: 0 }}>
+                <IconChip icon={<icons.SafetyCertificateOutlined />} bg={DP.primarySoft} color={DP.primary} size={28} radius={7} fontSize={14} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>Admin console</div>
+                  <div style={{ fontSize: 10.5, color: DP.textDim, whiteSpace: 'nowrap' }}>Guardrails, policies, access</div>
+                </div>
+              </Flex>
+              {adminConsoleUrl && <icons.ExportOutlined style={{ color: DP.textDim, fontSize: 12, flex: 'none' }} />}
+            </Flex>
+          </Tooltip>
+          <Dropdown trigger={['click']} menu={{ items: [{ key: 'out', icon: <icons.LogoutOutlined />, label: 'Sign out' }],
+            onClick: () => { window.location.href = '/auth/logout'; } }}>
+            <Flex align="center" gap={8} style={{ cursor: 'pointer', minWidth: 0 }}>
+              <Avatar style={{ background: a.bg, color: a.color, fontWeight: 700, flex: 'none' }}>{initials(me.user.name)}</Avatar>
+              <div style={{ minWidth: 0 }}><div style={{ fontSize: 12, fontWeight: 700 }}>{me.user.name}</div>
+                <div style={{ fontSize: 11, color: DP.textDim, overflow: 'hidden', textOverflow: 'ellipsis' }}>{me.user.email}</div></div>
+            </Flex>
+          </Dropdown>
+        </Flex>
+      </Flex>
+    </Layout.Sider>
+  );
+};
+
+/* ── App ────────────────────────────────────────────────────────────────── */
+const LoginScreen = ({ portalName, error }) => {
+  const [loading, setLoading] = useState(false);
+  return (
+    <Flex align="center" justify="center" style={{ minHeight: '100vh', fontFamily: DP.font,
+      background: `radial-gradient(1200px 600px at 50% -10%, ${DP.primarySoft} 0%, ${DP.bg} 60%)` }}>
+      <Card bordered style={{ width: 400, borderColor: DP.border, boxShadow: '0 8px 28px rgba(0,0,0,0.06)' }}
+        bodyStyle={{ padding: 32 }}>
+        <Flex vertical align="center" gap={20}>
+          <Flex align="center" gap={10}>
+            <BrandMark name={portalName} size={34} />
+            <Text strong style={{ fontSize: 16 }}>{portalName}</Text>
+          </Flex>
+          <Flex vertical align="center" gap={4} style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: DP.text }}>Sign in to your workspace</div>
+            <div style={{ fontSize: 13, color: DP.textMuted, lineHeight: 1.5 }}>
+              Use your organization single sign-on to continue.
+            </div>
+          </Flex>
+          {error && <Alert type="error" showIcon message={error} style={{ width: '100%' }} />}
+          <Button type="primary" block size="large" loading={loading}
+            onClick={() => { setLoading(true); window.location.href = '/auth/login'; }}
+            icon={loading ? null : <icons.SafetyCertificateOutlined />}>
+            {loading ? 'Signing in…' : 'Log in with SSO'}
+          </Button>
+        </Flex>
+      </Card>
+    </Flex>
+  );
+};
+
+function App() {
+  const [me, setMe] = useState(undefined);       // undefined: loading, null: signed out
+  const [error, setError] = useState(null);
+  const [workspaceId, setWorkspaceId] = useState(() => localStorage.getItem('workspace'));
+  const [active, setActive] = useState(null);
+
+  useEffect(() => {
+    api('/api/me').then(setMe, e => { setMe(null); if (e.message !== 'Signed out') setError(e.message); });
+    const out = () => setMe(null);
+    window.addEventListener('signed-out', out);
+    return () => window.removeEventListener('signed-out', out);
+  }, []);
+  useEffect(() => { if (me?.config) document.title = me.config.portalName; }, [me]);
+
+  let body;
+  if (me === undefined) body = <Flex align="center" justify="center" style={{ minHeight: '100vh' }}><Spin size="large" /></Flex>;
+  else if (!me) body = <LoginScreen portalName={document.title} error={error} />;
+  else if (!me.workspaces.length) body = <Result status="403" title="No workspace yet"
+    subTitle="You are not a member of any workspace. Ask your workspace manager to add you." />;
+  else {
+    const ws = me.workspaces.find(w => w.id === workspaceId) || me.workspaces[0];
+    const isManager = ws.role === 'manager';
+    const page = active || (isManager ? 'overview' : 'start');
+    // Key per page too: My API Keys and Workspace Keys share one component.
+    const props = { ws, me, key: `${ws.id}:${page}`, onNavigate: setActive };
+    const pages = {
+      start: <GetStartedPage {...props} />,
+      overview: <OverviewPage {...props} scope={isManager ? 'workspace' : 'me'} />,
+      keys: <ApiKeysPage {...props} scope="mine" />,
+      catalog: <CatalogPage {...props} />,
+      ...(isManager && { members: <MembersPage {...props} />, wskeys: <ApiKeysPage {...props} scope="all" /> }),
+    };
+    const switchWorkspace = id => { localStorage.setItem('workspace', id); setWorkspaceId(id); setActive(null); };
+    body = (
+      <Layout style={{ minHeight: '100vh', background: DP.bg, fontFamily: DP.font }}>
+        <Sidebar me={me} ws={ws} onWorkspaceChange={switchWorkspace} active={page} onNavSelect={setActive} />
+        <Layout.Content style={{ padding: 24 }}>{pages[page] || pages.catalog}</Layout.Content>
+      </Layout>
+    );
+  }
+  return <ConfigProvider theme={LIGHT_THEME}><AntApp>{body}</AntApp></ConfigProvider>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body></html>

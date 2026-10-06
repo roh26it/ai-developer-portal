@@ -1,0 +1,15 @@
+{
+  "name": "ai-developer-portal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-service developer portal over the management plane",
+  "type": "module",
+  "engines": { "bun": ">=1.4" },
+  "scripts": {
+    "start": "bun server.js",
+    "dev": "bun --no-env-file --watch dev/dev.js",
+    "test": "bun test",
+    "build": "bun build server.js --compile --minify --outfile dist/ai-developer-portal",
+    "build:linux": "bun build server.js --compile --minify --target=bun-linux-x64 --outfile dist/ai-developer-portal-linux-x64 && bun build server.js --compile --minify --target=bun-linux-arm64 --outfile dist/ai-developer-portal-linux-arm64"
+  }
+}
